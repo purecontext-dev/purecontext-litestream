@@ -1,5 +1,5 @@
 {
-  "name": "purecontext-litestream",
+  "name": "@purecontext/litestream",
   "version": "0.1.0",
   "description": "Litestream sidecar for SQLite backup — shared across Pure Context projects",
   "type": "module",
@@ -11,12 +11,28 @@
       "import": "./dist/index.js"
     }
   },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
-    "restore": "node dist/restore.js"
+    "restore": "node dist/restore.js",
+    "prepublishOnly": "tsc"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jeffreese/purecontext-litestream.git"
+  },
+  "license": "MIT",
+  "keywords": [
+    "litestream",
+    "sqlite",
+    "backup",
+    "replication",
+    "s3"
+  ],
   "devDependencies": {
     "@biomejs/biome": "^1.9.0",
     "@types/node": "^22.0.0",
