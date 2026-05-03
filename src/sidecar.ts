@@ -56,54 +56,29 @@ function generateConfigMulti(dbs: LitestreamOptions[]): string {
   return `dbs:\n${sections.join('\n')}\n`
 }
 
-function reapStaleLitestreams(): void {
-  let pids: number[]
-  try {
-    const out = execFileSync('pgrep', ['-f', 'litestream replicate'], {
-      encoding: 'utf8',
-    }).trim()
-    pids = out
-      .split('\n')
-      .map((p) => Number.parseInt(p, 10))
-      .filter((p) => Number.isFinite(p) && p !== process.pid)
-  } catch {
-    return
-  }
+function stopPreviousChild(): void {
+  if (!state) return
 
-  if (pids.length === 0) return
+  const { child } = state
+  if (child.exitCode !== null || child.killed) return
 
-  console.error(
-    `[litestream] reaping ${pids.length} stale replicator(s): ${pids.join(', ')}`,
-  )
-
-  for (const pid of pids) {
-    try {
-      process.kill(pid, 'SIGTERM')
-    } catch {
-      // already gone
-    }
-  }
+  console.error(`[litestream] stopping previous replicator (pid ${child.pid})`)
+  child.kill('SIGTERM')
 
   const deadline = Date.now() + 2000
   while (Date.now() < deadline) {
-    const alive = pids.filter((pid) => {
-      try {
-        process.kill(pid, 0)
-        return true
-      } catch {
-        return false
-      }
-    })
-    if (alive.length === 0) return
+    try {
+      process.kill(child.pid!, 0)
+    } catch {
+      return
+    }
     execFileSync('sleep', ['0.1'])
   }
 
-  for (const pid of pids) {
-    try {
-      process.kill(pid, 'SIGKILL')
-    } catch {
-      // already gone
-    }
+  try {
+    child.kill('SIGKILL')
+  } catch {
+    // already gone
   }
 }
 
@@ -127,7 +102,7 @@ export function startLitestreamAll(dbs: LitestreamOptions[]): boolean {
     return false
   }
 
-  reapStaleLitestreams()
+  stopPreviousChild()
 
   const configPath = join(tmpdir(), `litestream-${process.pid}.yml`)
   writeFileSync(configPath, generateConfigMulti(dbs))
