@@ -1,4 +1,4 @@
-export { startLitestream, stopLitestream } from './sidecar.js'
+export { startLitestream, startLitestreamAll, stopLitestream } from './sidecar.js'
 export type { LitestreamOptions } from './sidecar.js'
 export { restoreDatabase } from './restore.js'
 export type { RestoreOptions } from './restore.js'

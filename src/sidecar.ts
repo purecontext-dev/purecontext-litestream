@@ -36,10 +36,10 @@ function resolveEnv(opts: LitestreamOptions) {
   }
 }
 
-function generateConfig(opts: LitestreamOptions): string {
-  const env = resolveEnv(opts)
-  return `dbs:
-  - path: ${opts.dbPath}
+function generateConfigMulti(dbs: LitestreamOptions[]): string {
+  const sections = dbs.map((opts) => {
+    const env = resolveEnv(opts)
+    return `  - path: ${opts.dbPath}
     replicas:
       - type: s3
         bucket: ${env.bucket}
@@ -51,8 +51,9 @@ function generateConfig(opts: LitestreamOptions): string {
         force-path-style: true
         retention: ${opts.retention ?? '720h'}
         snapshot-interval: ${opts.snapshotInterval ?? '24h'}
-        sync-interval: ${opts.syncInterval ?? '1s'}
-`
+        sync-interval: ${opts.syncInterval ?? '1s'}`
+  })
+  return `dbs:\n${sections.join('\n')}\n`
 }
 
 function reapStaleLitestreams(): void {
@@ -107,8 +108,14 @@ function reapStaleLitestreams(): void {
 }
 
 export function startLitestream(opts: LitestreamOptions): boolean {
-  loadLitestreamEnv(opts.envFile)
-  const env = resolveEnv(opts)
+  return startLitestreamAll([opts])
+}
+
+export function startLitestreamAll(dbs: LitestreamOptions[]): boolean {
+  if (dbs.length === 0) return false
+
+  loadLitestreamEnv(dbs[0].envFile)
+  const env = resolveEnv(dbs[0])
   const missing = (['bucket', 'endpoint', 'accessKeyId', 'secretAccessKey'] as const).filter(
     (k) => !env[k],
   )
@@ -123,7 +130,7 @@ export function startLitestream(opts: LitestreamOptions): boolean {
   reapStaleLitestreams()
 
   const configPath = join(tmpdir(), `litestream-${process.pid}.yml`)
-  writeFileSync(configPath, generateConfig(opts))
+  writeFileSync(configPath, generateConfigMulti(dbs))
 
   const child = spawn('litestream', ['replicate', '-config', configPath], {
     stdio: ['ignore', 'ignore', 'pipe'],
@@ -154,9 +161,11 @@ export function startLitestream(opts: LitestreamOptions): boolean {
   process.on('SIGINT', stopLitestream)
   process.on('SIGTERM', stopLitestream)
 
-  console.error(
-    `[litestream] replicating ${opts.dbPath} → s3://${env.bucket}/${opts.replicaPath}`,
-  )
+  for (const db of dbs) {
+    console.error(
+      `[litestream] replicating ${db.dbPath} → s3://${env.bucket}/${db.replicaPath}`,
+    )
+  }
   return true
 }
 
