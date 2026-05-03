@@ -1,5 +1,5 @@
 import { execFileSync, type ChildProcess, spawn } from 'node:child_process'
-import { writeFileSync, unlinkSync } from 'node:fs'
+import { writeFileSync, appendFileSync, unlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { loadLitestreamEnv } from './env.js'
@@ -16,6 +16,7 @@ export interface LitestreamOptions {
   snapshotInterval?: string
   retention?: string
   envFile?: string
+  logFile?: string
 }
 
 interface LitestreamState {
@@ -111,9 +112,17 @@ export function startLitestreamAll(dbs: LitestreamOptions[]): boolean {
     stdio: ['ignore', 'ignore', 'pipe'],
   })
 
+  const logFile = dbs.find((d) => d.logFile)?.logFile
   child.stderr?.on('data', (data: Buffer) => {
     const msg = data.toString().trim()
-    if (msg) console.error(`[litestream] ${msg}`)
+    if (!msg) return
+    const line = `[${new Date().toISOString()}] ${msg}\n`
+    console.error(`[litestream] ${msg}`)
+    if (logFile) {
+      try {
+        appendFileSync(logFile, line)
+      } catch {}
+    }
   })
 
   child.on('error', (err: NodeJS.ErrnoException) => {
