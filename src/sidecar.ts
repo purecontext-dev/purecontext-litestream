@@ -1,11 +1,12 @@
 import { execFileSync, type ChildProcess, spawn } from 'node:child_process'
-import { writeFileSync, appendFileSync, unlinkSync } from 'node:fs'
+import { writeFileSync, appendFileSync, unlinkSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { loadLitestreamEnv } from './env.js'
 
 export interface LitestreamOptions {
   name?: string
+  configDir?: string
   dbPath: string
   replicaPath: string
   bucket?: string
@@ -149,11 +150,13 @@ export function startLitestreamAll(dbs: LitestreamOptions[]): boolean {
 
   const name = dbs[0].name ?? `pid-${process.pid}`
   const cfgName = configFileName(name)
+  const dir = dbs[0].configDir ?? tmpdir()
 
   stopPreviousChild()
   killOrphans(cfgName)
 
-  const configPath = join(tmpdir(), cfgName)
+  mkdirSync(dir, { recursive: true })
+  const configPath = join(dir, cfgName)
   writeFileSync(configPath, generateConfigMulti(dbs))
 
   const child = spawn('litestream', ['replicate', '-config', configPath], {
