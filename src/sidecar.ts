@@ -1,11 +1,11 @@
-import { createHash } from 'node:crypto'
 import { execFileSync, type ChildProcess, spawn } from 'node:child_process'
-import { writeFileSync, readFileSync, appendFileSync, unlinkSync } from 'node:fs'
+import { writeFileSync, appendFileSync, unlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { loadLitestreamEnv } from './env.js'
 
 export interface LitestreamOptions {
+  name?: string
   dbPath: string
   replicaPath: string
   bucket?: string
@@ -23,7 +23,6 @@ export interface LitestreamOptions {
 interface LitestreamState {
   child: ChildProcess
   configPath: string
-  pidFile: string
 }
 
 let state: LitestreamState | null = null
@@ -59,47 +58,47 @@ function generateConfigMulti(dbs: LitestreamOptions[]): string {
   return `dbs:\n${sections.join('\n')}\n`
 }
 
-function pidFilePath(dbs: LitestreamOptions[]): string {
-  const key = dbs.map((d) => d.dbPath).sort().join('|')
-  const hash = createHash('sha256').update(key).digest('hex').slice(0, 12)
-  return join(tmpdir(), `litestream-${hash}.pid`)
+function configFileName(name: string): string {
+  return `litestream-${name}.yml`
 }
 
-function killOrphan(pidFile: string): void {
-  let pid: number
+function killOrphans(configName: string): void {
+  let pids: string
   try {
-    pid = parseInt(readFileSync(pidFile, 'utf-8').trim(), 10)
+    pids = execFileSync('pgrep', ['-f', configName], { encoding: 'utf-8' }).trim()
   } catch {
     return
   }
-  if (isNaN(pid)) return
+  if (!pids) return
 
-  try {
-    process.kill(pid, 0)
-  } catch {
-    return
-  }
+  for (const line of pids.split('\n')) {
+    const pid = parseInt(line.trim(), 10)
+    if (isNaN(pid)) continue
 
-  console.error(`[litestream] killing orphaned replicator (pid ${pid})`)
-  try {
-    process.kill(pid, 'SIGTERM')
-  } catch {
-    return
+    console.error(`[litestream] killing orphaned replicator (pid ${pid})`)
+    try {
+      process.kill(pid, 'SIGTERM')
+    } catch {}
   }
 
   const deadline = Date.now() + 2000
-  while (Date.now() < deadline) {
-    try {
-      process.kill(pid, 0)
-    } catch {
-      return
-    }
-    execFileSync('sleep', ['0.1'])
-  }
+  for (const line of pids.split('\n')) {
+    const pid = parseInt(line.trim(), 10)
+    if (isNaN(pid)) continue
 
-  try {
-    process.kill(pid, 'SIGKILL')
-  } catch {}
+    while (Date.now() < deadline) {
+      try {
+        process.kill(pid, 0)
+      } catch {
+        break
+      }
+      execFileSync('sleep', ['0.1'])
+    }
+
+    try {
+      process.kill(pid, 'SIGKILL')
+    } catch {}
+  }
 }
 
 function stopPreviousChild(): void {
@@ -148,19 +147,18 @@ export function startLitestreamAll(dbs: LitestreamOptions[]): boolean {
     return false
   }
 
+  const name = dbs[0].name ?? `pid-${process.pid}`
+  const cfgName = configFileName(name)
+
   stopPreviousChild()
+  killOrphans(cfgName)
 
-  const pf = pidFilePath(dbs)
-  killOrphan(pf)
-
-  const configPath = join(tmpdir(), `litestream-${process.pid}.yml`)
+  const configPath = join(tmpdir(), cfgName)
   writeFileSync(configPath, generateConfigMulti(dbs))
 
   const child = spawn('litestream', ['replicate', '-config', configPath], {
     stdio: ['ignore', 'ignore', 'pipe'],
   })
-
-  if (child.pid) writeFileSync(pf, String(child.pid))
 
   const logFile = dbs.find((d) => d.logFile)?.logFile
   child.stderr?.on('data', (data: Buffer) => {
@@ -190,7 +188,7 @@ export function startLitestreamAll(dbs: LitestreamOptions[]): boolean {
     cleanup()
   })
 
-  state = { child, configPath, pidFile: pf }
+  state = { child, configPath }
 
   process.on('SIGINT', stopLitestream)
   process.on('SIGTERM', stopLitestream)
@@ -207,9 +205,6 @@ function cleanup(): void {
   if (!state) return
   try {
     unlinkSync(state.configPath)
-  } catch {}
-  try {
-    unlinkSync(state.pidFile)
   } catch {}
   state = null
 }
